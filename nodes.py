@@ -156,7 +156,7 @@ def _ensure_model_on_device(model, device):
 def _unload_model_from_vram(model, cache_key=None):
     print("[ToriiGate] keep_model_alive is disabled; unloading model from VRAM.")
     if cache_key is not None:
-        ToriiGateModelLoader._cache.pop(cache_key, None)
+        ToriiGateCaptioner._cache.pop(cache_key, None)
     try:
         model.to("cpu")
     except Exception as exc:
@@ -170,12 +170,228 @@ def _unload_model_from_vram(model, cache_key=None):
         _cuda_memory_status()
 
 
-class ToriiGateModelLoader:
-    _cache = {}
 
+class ToriiGateGroundingBuilder:
     @classmethod
     def INPUT_TYPES(cls):
         return {
+            "required": {
+                "caption_type": (
+                    CAPTION_TYPES,
+                    {
+                        "default": "short",
+                        "tooltip": "Caption format. short is fastest; long is detailed natural text; json/min_structured produce structured output; long_thoughts_v2 is the most detailed.",
+                    },
+                ),
+                "use_names": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Allows the model to use or try to recognize character names.",
+                    },
+                ),
+                "add_tags": ("BOOLEAN", {"default": False, "tooltip": "Show and use general tags."}),
+                "tags": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "General booru tags for the image, separated by commas. Example: 1girl, blue_hair, school_uniform. These are only added to the prompt when add_tags is enabled.",
+                    },
+                ),
+                "add_character_list": ("BOOLEAN", {"default": False, "tooltip": "Show and use character list."}),
+                "character_names": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "General character list, separated by commas. If char1_name through char5_name are empty, their tag/description slots are matched to this list by position.",
+                    },
+                ),
+                "character_count": ("INT", {"default": 1, "min": 0, "max": 5, "step": 1, "tooltip": "Number of characters to configure."}),
+                "add_character_tags": ("BOOLEAN", {"default": False, "tooltip": "Show and use character tags."}),
+                "add_character_descriptions": ("BOOLEAN", {"default": False, "tooltip": "Show and use character descriptions."}),
+                "char1_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 1. Example: hoshimi_miyabi."}),
+                "char1_tags": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Booru tags specific to character 1, separated by commas. Uses char1_name, or the first name from character_names if char1_name is empty.",
+                    },
+                ),
+                "char1_description": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Free-form description for character 1. Useful when tags are not enough, such as visual personality, a specific uniform, or an alternate version.",
+                    },
+                ),
+                "char2_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 2."}),
+                "char2_tags": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Booru tags specific to character 2, separated by commas. Uses char2_name, or the second name from character_names if char2_name is empty.",
+                    },
+                ),
+                "char2_description": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Free-form description for character 2.",
+                    },
+                ),
+                "char3_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 3."}),
+                "char3_tags": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Booru tags specific to character 3, separated by commas. Uses char3_name, or the third name from character_names if char3_name is empty.",
+                    },
+                ),
+                "char3_description": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Free-form description for character 3.",
+                    },
+                ),
+                "char4_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 4."}),
+                "char4_tags": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Booru tags specific to character 4, separated by commas. Uses char4_name, or the fourth name from character_names if char4_name is empty.",
+                    },
+                ),
+                "char4_description": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Free-form description for character 4.",
+                    },
+                ),
+                "char5_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 5."}),
+                "char5_tags": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Booru tags specific to character 5, separated by commas. Uses char5_name, or the fifth name from character_names if char5_name is empty.",
+                    },
+                ),
+                "char5_description": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Free-form description for character 5.",
+                    },
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("prompt",)
+    FUNCTION = "build_grounding"
+    CATEGORY = "ToriiGate/Grounding"
+
+    def build_grounding(
+        self,
+        caption_type="short",
+        use_names=True,
+        add_tags=False,
+        tags="",
+        add_character_list=False,
+        character_names="",
+        character_count=1,
+        add_character_tags=False,
+        add_character_descriptions=False,
+        char1_name="",
+        char1_tags="",
+        char2_name="",
+        char2_tags="",
+        char3_name="",
+        char3_tags="",
+        char4_name="",
+        char4_tags="",
+        char5_name="",
+        char5_tags="",
+        char1_description="",
+        char2_description="",
+        char3_description="",
+        char4_description="",
+        char5_description="",
+    ):
+        item = _empty_grounding()
+        if add_tags:
+            item["tags"] = _split_csv(tags)
+        if add_character_list:
+            item["characters"] = _split_csv(character_names)
+
+        char_entries = [
+            (char1_name, char1_tags if add_character_tags else "", char1_description if add_character_descriptions else ""),
+            (char2_name, char2_tags if add_character_tags else "", char2_description if add_character_descriptions else ""),
+            (char3_name, char3_tags if add_character_tags else "", char3_description if add_character_descriptions else ""),
+            (char4_name, char4_tags if add_character_tags else "", char4_description if add_character_descriptions else ""),
+            (char5_name, char5_tags if add_character_tags else "", char5_description if add_character_descriptions else ""),
+        ][:int(character_count)]
+
+        auto_chars = []
+        for index, (raw_name, raw_tags, raw_description) in enumerate(char_entries):
+            name = raw_name.strip() if raw_name else ""
+            if not name and index < len(item["characters"]):
+                name = item["characters"][index]
+            if not name:
+                continue
+
+            auto_chars.append(name)
+
+            parsed_tags = _split_csv(raw_tags)
+            if parsed_tags:
+                item["char_p_tags"]["chars"][name] = parsed_tags
+
+            description = raw_description.strip() if raw_description else ""
+            if description:
+                item["char_descr"]["chars"][name] = description
+
+        if auto_chars and not item["characters"]:
+            item["characters"] = auto_chars
+
+        prompt = make_user_query(
+            item,
+            c_type=caption_type,
+            use_names=use_names,
+            add_tags=add_tags,
+            add_characters=add_character_list,
+            add_char_tags=add_character_tags,
+            add_description=add_character_descriptions,
+            underscores_replace=False,
+        )
+
+        return (prompt,)
+
+
+class ToriiGateCaptioner:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": (
+                    "IMAGE",
+                    {
+                        "tooltip": "ComfyUI image tensor. The node uses only the first image in the batch and converts it to RGB before captioning.",
+                    },
+                ),
+            },
             "optional": {
                 "model_path": (
                     "STRING",
@@ -215,310 +431,13 @@ class ToriiGateModelLoader:
                         "tooltip": "Keeps the model loaded in VRAM/cache after generation. Enable for repeated captions; disable to free VRAM after each run.",
                     },
                 ),
-            }
-        }
-
-    RETURN_TYPES = ("TORIIGATE_MODEL",)
-    FUNCTION = "load_model"
-    CATEGORY = "ToriiGate/Loaders"
-
-    def load_model(
-        self,
-        model_path="Minthy/ToriiGate-0.5",
-        device="cuda",
-        dtype="bfloat16",
-        max_pixels_mp=1.0,
-        keep_model_alive=False,
-    ):
-        resolved_device = _resolve_device(device)
-        torch_dtype = _resolve_dtype(dtype)
-        cache_key = (model_path, resolved_device, dtype)
-
-        _print_model_intro(model_path, resolved_device, dtype, float(max_pixels_mp))
-
-        if cache_key not in self._cache:
-            try:
-                from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
-            except ImportError as exc:
-                raise ImportError(
-                    "ToriiGate requires a recent transformers build with "
-                    "Qwen3_5ForConditionalGeneration. Install requirements.txt "
-                    "or upgrade transformers."
-                ) from exc
-
-            load_path = _pre_download_model(model_path)
-            print(
-                f"[ToriiGate] Loading model '{load_path}' on {resolved_device} "
-                f"with dtype {dtype}."
-            )
-            start_time = time.perf_counter()
-            model = Qwen3_5ForConditionalGeneration.from_pretrained(
-                load_path,
-                torch_dtype=torch_dtype,
-                attn_implementation="sdpa",
-            )
-            model.to(resolved_device)
-            model.eval()
-
-            processor = AutoProcessor.from_pretrained(
-                load_path,
-                min_pixels=256 * 32 * 32,
-                padding_side="right",
-            )
-            elapsed = time.perf_counter() - start_time
-            print(f"[ToriiGate] Model loaded in {elapsed:.1f}s.")
-            _cuda_memory_status()
-            self._cache[cache_key] = (model, processor, resolved_device)
-        else:
-            print(f"[ToriiGate] Reusing cached model '{model_path}'.")
-
-        model, processor, resolved_device = self._cache[cache_key]
-        return (
-            (
-                model,
-                processor,
-                resolved_device,
-                float(max_pixels_mp),
-                bool(keep_model_alive),
-                cache_key,
-            ),
-        )
-
-
-class ToriiGateGroundingBuilder:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "tags": (
+                "prompt": (
                     "STRING",
                     {
                         "multiline": True,
                         "default": "",
-                        "tooltip": "General booru tags for the image, separated by commas. Example: 1girl, blue_hair, school_uniform. These are only added to the prompt when add_tags is enabled in the Captioner.",
-                    },
-                ),
-                "character_names": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "General character list, separated by commas. If char1_name through char5_name are empty, their tag/description slots are matched to this list by position.",
-                    },
-                ),
-                "char1_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 1. Example: hoshimi_miyabi."}),
-                "char1_tags": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Booru tags specific to character 1, separated by commas. Uses char1_name, or the first name from character_names if char1_name is empty.",
-                    },
-                ),
-                "char2_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 2."}),
-                "char2_tags": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Booru tags specific to character 2, separated by commas. Uses char2_name, or the second name from character_names if char2_name is empty.",
-                    },
-                ),
-                "char3_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 3."}),
-                "char3_tags": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Booru tags specific to character 3, separated by commas. Uses char3_name, or the third name from character_names if char3_name is empty.",
-                    },
-                ),
-                "char4_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 4."}),
-                "char4_tags": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Booru tags specific to character 4, separated by commas. Uses char4_name, or the fourth name from character_names if char4_name is empty.",
-                    },
-                ),
-                "char5_name": ("STRING", {"default": "", "tooltip": "Name/tag for character 5."}),
-                "char5_tags": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Booru tags specific to character 5, separated by commas. Uses char5_name, or the fifth name from character_names if char5_name is empty.",
-                    },
-                ),
-                "char1_description": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Free-form description for character 1. Useful when tags are not enough, such as visual personality, a specific uniform, or an alternate version.",
-                    },
-                ),
-                "char2_description": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Free-form description for character 2.",
-                    },
-                ),
-                "char3_description": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Free-form description for character 3.",
-                    },
-                ),
-                "char4_description": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Free-form description for character 4.",
-                    },
-                ),
-                "char5_description": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Free-form description for character 5.",
-                    },
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("TORIIGATE_GROUNDING",)
-    FUNCTION = "build_grounding"
-    CATEGORY = "ToriiGate/Grounding"
-
-    def build_grounding(
-        self,
-        tags="",
-        character_names="",
-        char1_name="",
-        char1_tags="",
-        char2_name="",
-        char2_tags="",
-        char3_name="",
-        char3_tags="",
-        char4_name="",
-        char4_tags="",
-        char5_name="",
-        char5_tags="",
-        char1_description="",
-        char2_description="",
-        char3_description="",
-        char4_description="",
-        char5_description="",
-    ):
-        item = _empty_grounding()
-        item["tags"] = _split_csv(tags)
-        item["characters"] = _split_csv(character_names)
-
-        char_entries = [
-            (char1_name, char1_tags, char1_description),
-            (char2_name, char2_tags, char2_description),
-            (char3_name, char3_tags, char3_description),
-            (char4_name, char4_tags, char4_description),
-            (char5_name, char5_tags, char5_description),
-        ]
-
-        auto_chars = []
-        for index, (raw_name, raw_tags, raw_description) in enumerate(char_entries):
-            name = raw_name.strip() if raw_name else ""
-            if not name and index < len(item["characters"]):
-                name = item["characters"][index]
-            if not name:
-                continue
-
-            auto_chars.append(name)
-
-            parsed_tags = _split_csv(raw_tags)
-            if parsed_tags:
-                item["char_p_tags"]["chars"][name] = parsed_tags
-
-            description = raw_description.strip() if raw_description else ""
-            if description:
-                item["char_descr"]["chars"][name] = description
-
-        if auto_chars and not item["characters"]:
-            item["characters"] = auto_chars
-
-        return (item,)
-
-
-class ToriiGateCaptioner:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "toriigate_model": (
-                    "TORIIGATE_MODEL",
-                    {
-                        "tooltip": "Output from ToriiGate Model Loader. Contains the model, processor, device, resolution limit, and VRAM keep/unload policy.",
-                    },
-                ),
-                "image": (
-                    "IMAGE",
-                    {
-                        "tooltip": "ComfyUI image tensor. The node uses only the first image in the batch and converts it to RGB before captioning.",
-                    },
-                ),
-            },
-            "optional": {
-                "grounding": (
-                    "TORIIGATE_GROUNDING",
-                    {
-                        "tooltip": "Optional output from ToriiGate Grounding Builder with tags, names, and character descriptions to guide the caption.",
-                    },
-                ),
-                "caption_type": (
-                    CAPTION_TYPES,
-                    {
-                        "default": "short",
-                        "tooltip": "Caption format. short is fastest; long is detailed natural text; json/min_structured produce structured output; long_thoughts_v2 is the most detailed, but also slower.",
-                    },
-                ),
-                "use_names": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "Allows the model to use or try to recognize character names. Recommended for long_thoughts_v2, long_thoughts, md_comic, and min_structured_md.",
-                    },
-                ),
-                "add_tags": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "Adds general booru tags from the Grounding Builder to the prompt. Improves precision, but can bias the caption if the tags are wrong.",
-                    },
-                ),
-                "add_character_list": (
-                    "BOOLEAN",
-                    {
-                        "default": False,
-                        "tooltip": "Explicitly adds the character name list to the prompt. Enable when you already know who appears in the image.",
-                    },
-                ),
-                "add_character_tags": (
-                    "BOOLEAN",
-                    {
-                        "default": False,
-                        "tooltip": "Adds per-character tags. Useful for distinguishing similar characters, outfits, hair, and accessories.",
-                    },
-                ),
-                "add_character_descriptions": (
-                    "BOOLEAN",
-                    {
-                        "default": False,
-                        "tooltip": "Adds free-form per-character descriptions. Use this when you want to guide the model with richer text than booru tags.",
+                        "tooltip": "Optional prompt. You can connect the text output from the ToriiGate Grounding Builder here, or type your own.",
+                        "forceInput": True,
                     },
                 ),
                 "max_new_tokens": (
@@ -571,17 +490,17 @@ class ToriiGateCaptioner:
     FUNCTION = "caption"
     CATEGORY = "ToriiGate"
 
+    _cache = {}
+
     def caption(
         self,
-        toriigate_model,
         image,
-        grounding=None,
-        caption_type="short",
-        use_names=True,
-        add_tags=True,
-        add_character_list=False,
-        add_character_tags=False,
-        add_character_descriptions=False,
+        model_path="Minthy/ToriiGate-0.5",
+        device="cuda",
+        dtype="bfloat16",
+        max_pixels_mp=1.0,
+        keep_model_alive=False,
+        prompt="",
         max_new_tokens=512,
         temperature=0.5,
         decoding="greedy_fast",
@@ -597,14 +516,56 @@ class ToriiGateCaptioner:
 
         _ensure_model_on_device(model, device)
 
-        if caption_type not in prompts_b:
-            raise ValueError(f"Unknown ToriiGate caption_type: {caption_type}")
+        resolved_device = _resolve_device(device)
+        torch_dtype = _resolve_dtype(dtype)
+        cache_key = (model_path, resolved_device, dtype)
 
-        if prompts_names_only.get(caption_type, False) and not use_names:
+        _print_model_intro(model_path, resolved_device, dtype, float(max_pixels_mp))
+
+        if cache_key not in self._cache:
+            try:
+                from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+            except ImportError as exc:
+                raise ImportError(
+                    "ToriiGate requires a recent transformers build with "
+                    "Qwen3_5ForConditionalGeneration. Install requirements.txt "
+                    "or upgrade transformers."
+                ) from exc
+
+            load_path = _pre_download_model(model_path)
             print(
-                f"[ToriiGate] Warning: caption format '{caption_type}' is "
-                "designed for character names, but use_names is disabled."
+                f"[ToriiGate] Loading model '{load_path}' on {resolved_device} "
+                f"with dtype {dtype}."
             )
+            import time
+            start_time = time.perf_counter()
+            import torch
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                load_path,
+                torch_dtype=torch_dtype,
+                attn_implementation="sdpa",
+            )
+            model.to(resolved_device)
+            model.eval()
+
+            processor = AutoProcessor.from_pretrained(
+                load_path,
+                min_pixels=256 * 32 * 32,
+                padding_side="right",
+            )
+            elapsed = time.perf_counter() - start_time
+            print(f"[ToriiGate] Model loaded in {elapsed:.1f}s.")
+            _cuda_memory_status()
+            self._cache[cache_key] = (model, processor, resolved_device)
+        else:
+            print(f"[ToriiGate] Reusing cached model '{model_path}'.")
+
+        model, processor, resolved_device = self._cache[cache_key]
+
+        _ensure_model_on_device(model, resolved_device)
+
+        if not prompt:
+            prompt = "Describe this image in detail."
 
         img_np = (image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
         img_pil = Image.fromarray(img_np)
@@ -620,19 +581,6 @@ class ToriiGateCaptioner:
             new_h = max(1, int(img_pil.height * scale))
             img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-        item = grounding if grounding else _empty_grounding()
-
-        user_query = make_user_query(
-            item,
-            c_type=caption_type,
-            use_names=use_names,
-            add_tags=add_tags,
-            add_characters=add_character_list,
-            add_char_tags=add_character_tags,
-            add_description=add_character_descriptions,
-            underscores_replace=False,
-        )
-
         messages = [
             {
                 "role": "system",
@@ -642,7 +590,7 @@ class ToriiGateCaptioner:
                 "role": "user",
                 "content": [
                     {"type": "image"},
-                    {"type": "text", "text": user_query},
+                    {"type": "text", "text": prompt},
                 ],
             },
         ]
@@ -844,14 +792,17 @@ class ToriiGateCaptioner:
         sys.stdout.flush()
 
 
+from .nodes_api import NODE_CLASS_MAPPINGS_API, NODE_DISPLAY_NAME_MAPPINGS_API
+
 NODE_CLASS_MAPPINGS = {
-    "ToriiGate_ModelLoader": ToriiGateModelLoader,
     "ToriiGate_GroundingBuilder": ToriiGateGroundingBuilder,
     "ToriiGate_Captioner": ToriiGateCaptioner,
+    **NODE_CLASS_MAPPINGS_API,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ToriiGate_ModelLoader": "ToriiGate Model Loader",
     "ToriiGate_GroundingBuilder": "ToriiGate Grounding Builder",
     "ToriiGate_Captioner": "ToriiGate Captioner",
+    **NODE_DISPLAY_NAME_MAPPINGS_API,
 }
+
