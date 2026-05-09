@@ -163,9 +163,6 @@ def make_user_query(item, c_type, use_names, add_tags, add_characters, add_char_
         user_request += f"# Booru tags for the image\n[{tags_string}]\n\n"
     
     chars_tags = item.get('characters',[])
-    
-    if not chars_tags:
-        use_names = False
 
     if use_names:
         has_character_grounding = bool(chars_tags) or add_characters or add_char_tags or add_description
