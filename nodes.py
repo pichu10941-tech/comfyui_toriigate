@@ -793,16 +793,19 @@ class ToriiGateCaptioner:
 
 
 from .nodes_api import NODE_CLASS_MAPPINGS_API, NODE_DISPLAY_NAME_MAPPINGS_API
+from .nodes_gguf import NODE_CLASS_MAPPINGS_GGUF, NODE_DISPLAY_NAME_MAPPINGS_GGUF
 
 NODE_CLASS_MAPPINGS = {
     "ToriiGate_GroundingBuilder": ToriiGateGroundingBuilder,
     "ToriiGate_Captioner": ToriiGateCaptioner,
     **NODE_CLASS_MAPPINGS_API,
+    **NODE_CLASS_MAPPINGS_GGUF,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ToriiGate_GroundingBuilder": "ToriiGate Grounding Builder",
     "ToriiGate_Captioner": "ToriiGate Captioner",
     **NODE_DISPLAY_NAME_MAPPINGS_API,
+    **NODE_DISPLAY_NAME_MAPPINGS_GGUF,
 }
 
