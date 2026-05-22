@@ -70,11 +70,31 @@ def _gguf_filename(quant: str) -> str:
 
 
 # ===========================================================================
-# HuggingFace download helpers
+# ComfyUI model directory detection
 # ===========================================================================
 
-def _download_from_hf(repo_id: str, filename: str) -> str:
-    """Download a single file from HuggingFace Hub with progress reporting."""
+def _comfyui_models_dir() -> Path:
+    """Auto-detect ComfyUI's models/LLM directory from the node's location.
+
+    nodes_gguf.py lives at:  ComfyUI/custom_nodes/comfyui_toriigate/nodes_gguf.py
+    So models/LLM is at:     ../.. /models/LLM/ToriiGate/
+    """
+    node_dir = Path(__file__).resolve().parent          # .../custom_nodes/comfyui_toriigate/
+    comfyui_root = node_dir.parent.parent               # .../ComfyUI/
+    return comfyui_root / "models" / "LLM" / "ToriiGate"
+
+
+def _ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# ===========================================================================
+# HuggingFace download helpers — saves to ComfyUI/models/LLM/ToriiGate/
+# ===========================================================================
+
+def _download_from_hf(repo_id: str, filename: str, target_dir: Path) -> str:
+    """Download a single file from HuggingFace Hub to *target_dir*."""
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
@@ -84,24 +104,35 @@ def _download_from_hf(repo_id: str, filename: str) -> str:
             "Or provide local paths via gguf_path / mmproj_path."
         )
 
+    local_path = target_dir / filename
+    if local_path.exists():
+        print(f"[ToriiGate GGUF] Already exists: {local_path}")
+        return str(local_path)
+
     print(f"[ToriiGate GGUF] Downloading: {repo_id}/{filename}")
+    print(f"[ToriiGate GGUF]   → {local_path}")
+    # hf_hub_download still uses HF cache internally, but we symlink/copy
     result = hf_hub_download(
         repo_id=repo_id,
         filename=filename,
-        local_files_only=False,
+        local_dir=str(target_dir),
+        local_dir_use_symlinks=False,  # actual file, not symlink
+        resume_download=True,
     )
     return result
 
 
 def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
-    """Return (gguf_local, mmproj_local), downloading from HF if needed."""
+    """Return (gguf_local, mmproj_local), downloading to models/LLM/ToriiGate/ if needed."""
+    target_dir = _ensure_dir(_comfyui_models_dir())
+
     # --- GGUF ---
     if gguf_path and os.path.isfile(gguf_path):
         gguf_local = gguf_path
         print(f"[ToriiGate GGUF] Using local GGUF: {gguf_local}")
     else:
         fname = _gguf_filename(model_quant)
-        gguf_local = _download_from_hf(GGUF_REPO, fname)
+        gguf_local = _download_from_hf(GGUF_REPO, fname, target_dir)
 
     # --- MMproj ---
     if mmproj_path and os.path.isfile(mmproj_path):
@@ -109,7 +140,7 @@ def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
         print(f"[ToriiGate GGUF] Using local mmproj: {mmproj_local}")
     else:
         fname = _mmproj_for_quant(model_quant)
-        mmproj_local = _download_from_hf(GGUF_REPO, fname)
+        mmproj_local = _download_from_hf(GGUF_REPO, fname, target_dir)
 
     return gguf_local, mmproj_local
 
