@@ -100,13 +100,13 @@ The `ToriiGate GGUF Captioner (Embedded)` node runs the model directly inside Co
 
 ### How it works
 
-1. On first use, the node automatically downloads the GGUF model and mmproj from [DraconicDragon/ToriiGate-0.5-GGUF](https://huggingface.co/DraconicDragon/ToriiGate-0.5-GGUF) to `ComfyUI/models/LLM/ToriiGate/`.
+1. On first use, the node automatically downloads the GGUF model and mmproj from [DraconicDragon/ToriiGate-0.5-GGUF](https://huggingface.co/DraconicDragon/ToriiGate-0.5-GGUF) to `ComfyUI/models/LLM/`.
 2. The model is loaded via `llama-cpp-python` with full GPU acceleration (CUDA).
 3. Subsequent calls reuse the cached model (unless `keep_model_alive` is disabled).
 
 Files are saved as:
 ```
-ComfyUI/models/LLM/ToriiGate/
+ComfyUI/models/LLM/
 ├── ToriiGate-0.5-Q4_K_M.gguf        ← language model (~3 GB)
 └── ToriiGate-0.5-fp16.mmproj.gguf   ← vision projector (~200 MB)
 ```

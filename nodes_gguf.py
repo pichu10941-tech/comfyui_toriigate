@@ -81,7 +81,7 @@ def _comfyui_models_dir() -> Path:
     """
     node_dir = Path(__file__).resolve().parent          # .../custom_nodes/comfyui_toriigate/
     comfyui_root = node_dir.parent.parent               # .../ComfyUI/
-    return comfyui_root / "models" / "LLM" / "ToriiGate"
+    return comfyui_root / "models" / "LLM"
 
 
 def _ensure_dir(path: Path) -> Path:
@@ -123,7 +123,7 @@ def _download_from_hf(repo_id: str, filename: str, target_dir: Path) -> str:
 
 
 def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
-    """Return (gguf_local, mmproj_local), downloading to models/LLM/ToriiGate/ if needed."""
+    """Return (gguf_local, mmproj_local), downloading to models/LLM/ if needed."""
     target_dir = _ensure_dir(_comfyui_models_dir())
 
     # --- GGUF ---
