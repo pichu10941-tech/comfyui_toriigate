@@ -90,11 +90,16 @@ def _ensure_dir(path: Path) -> Path:
 
 
 # ===========================================================================
-# HuggingFace download helpers — saves to ComfyUI/models/LLM/ToriiGate/
+# HuggingFace download helpers — saves to ComfyUI/models/LLM/
 # ===========================================================================
 
-def _download_from_hf(repo_id: str, filename: str, target_dir: Path) -> str:
-    """Download a single file from HuggingFace Hub to *target_dir*."""
+def _download_file(repo_id: str, filename: str, target_dir: Path) -> str:
+    """Download a single file from HuggingFace Hub.
+
+    Uses standard hf_hub_download (to HF cache) then copies to *target_dir*.
+    This avoids relying on local_dir_use_symlinks which may fail on older
+    huggingface_hub versions.
+    """
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
@@ -109,17 +114,20 @@ def _download_from_hf(repo_id: str, filename: str, target_dir: Path) -> str:
         print(f"[ToriiGate GGUF] Already exists: {local_path}")
         return str(local_path)
 
+    # Download to HF cache first (always works, any version)
     print(f"[ToriiGate GGUF] Downloading: {repo_id}/{filename}")
-    print(f"[ToriiGate GGUF]   → {local_path}")
-    # hf_hub_download still uses HF cache internally, but we symlink/copy
-    result = hf_hub_download(
+    cached = hf_hub_download(
         repo_id=repo_id,
         filename=filename,
-        local_dir=str(target_dir),
-        local_dir_use_symlinks=False,  # actual file, not symlink
         resume_download=True,
     )
-    return result
+
+    # Copy to models/LLM/ (safely handles cross-filesystem)
+    import shutil
+    print(f"[ToriiGate GGUF] Copying to: {local_path}")
+    shutil.copy2(cached, str(local_path))
+    print(f"[ToriiGate GGUF] Done: {local_path}")
+    return str(local_path)
 
 
 def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
@@ -132,7 +140,7 @@ def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
         print(f"[ToriiGate GGUF] Using local GGUF: {gguf_local}")
     else:
         fname = _gguf_filename(model_quant)
-        gguf_local = _download_from_hf(GGUF_REPO, fname, target_dir)
+        gguf_local = _download_file(GGUF_REPO, fname, target_dir)
 
     # --- MMproj ---
     if mmproj_path and os.path.isfile(mmproj_path):
@@ -140,7 +148,7 @@ def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
         print(f"[ToriiGate GGUF] Using local mmproj: {mmproj_local}")
     else:
         fname = _mmproj_for_quant(model_quant)
-        mmproj_local = _download_from_hf(GGUF_REPO, fname, target_dir)
+        mmproj_local = _download_file(GGUF_REPO, fname, target_dir)
 
     return gguf_local, mmproj_local
 
@@ -290,6 +298,20 @@ class ToriiGateGGUFCaptioner:
         print(f"\n[ToriiGate GGUF] quant={model_quant}, n_gpu_layers={ngl}, n_ctx={ctx}")
         gguf_local, mmproj_local = _resolve_paths(model_quant, gguf_path, mmproj_path)
 
+        # ── verify files exist before loading ──────────────────────────
+        gguf_size = os.path.getsize(gguf_local) / (1024**3)
+        mmproj_size = os.path.getsize(mmproj_local) / (1024**3)
+        print(f"[ToriiGate GGUF] GGUF:  {gguf_local}  ({gguf_size:.2f} GB)")
+        print(f"[ToriiGate GGUF] MMproj: {mmproj_local}  ({mmproj_size:.2f} GB)")
+
+        # ── version diagnostics ────────────────────────────────────────
+        try:
+            import llama_cpp
+            llama_cpp_version = getattr(llama_cpp, "__version__", "unknown")
+            print(f"[ToriiGate GGUF] llama-cpp-python version: {llama_cpp_version}")
+        except Exception:
+            pass
+
         # ── load model ─────────────────────────────────────────────────
         if cache_key not in self._cache:
             print(f"[ToriiGate GGUF] Loading model via llama-cpp-python...")
@@ -315,6 +337,9 @@ class ToriiGateGGUFCaptioner:
         if img_pil.mode != "RGB":
             img_pil = img_pil.convert("RGB")
 
+        orig_w, orig_h = img_pil.width, img_pil.height
+        print(f"[ToriiGate GGUF] Input image: {orig_w}x{orig_h} ({orig_w*orig_h/1e6:.2f} MP)")
+
         # optional resize
         current_mp = (img_pil.width * img_pil.height) / 1_000_000
         if current_mp > max_pixels_mp:
@@ -322,12 +347,13 @@ class ToriiGateGGUFCaptioner:
             new_w = max(1, int(img_pil.width * scale))
             new_h = max(1, int(img_pil.height * scale))
             img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            print(f"[ToriiGate GGUF] Resized {img_pil.width}x{img_pil.height} ({max_pixels_mp:.1f} MP)")
+            print(f"[ToriiGate GGUF] Resized to {img_pil.width}x{img_pil.height} ({max_pixels_mp:.1f} MP)")
 
-        # base64 PNG
+        # base64 JPEG (smaller than PNG, same quality for captioning)
         buf = io.BytesIO()
-        img_pil.save(buf, format="PNG")
+        img_pil.save(buf, format="JPEG", quality=95)
         b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+        print(f"[ToriiGate GGUF] Image encoded: {len(b64_data)//1024} KB base64 JPEG")
 
         # ── build messages ─────────────────────────────────────────────
         seed_val = int(seed) if seed != 0 else random.SystemRandom().randint(1, 2**63 - 1)
@@ -339,7 +365,7 @@ class ToriiGateGGUFCaptioner:
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_data}"}},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"}},
             ],
         })
 
@@ -363,9 +389,10 @@ class ToriiGateGGUFCaptioner:
                 f"[ToriiGate GGUF] Unexpected response format:\n{response}"
             ) from exc
 
-        # rough token count
+        # rough token count (1 token ≈ 4 chars for English)
         approx_tokens = max(1, len(caption) // 4)
         print(f"[ToriiGate GGUF] Done in {elapsed:.1f}s ({approx_tokens} tok, {approx_tokens/elapsed:.1f} tok/s).")
+        print(f"[ToriiGate GGUF] Caption ({len(caption)} chars): {caption[:200]}...")
 
         # ── cleanup ───────────────────────────────────────────────────
         if not keep_model_alive:
