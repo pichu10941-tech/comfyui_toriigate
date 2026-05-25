@@ -359,6 +359,13 @@ class ToriiGateGGUFCaptioner:
             )
             t1 = time.perf_counter()
             print(f"[ToriiGate GGUF] Model loaded in {t1 - t0:.1f}s.")
+            # Diagnose: what chat handler is being used?
+            try:
+                fmt = getattr(llm, "chat_format", "unknown")
+                tpl = getattr(llm, "chat_template", "from_gguf")
+                print(f"[ToriiGate GGUF] Chat format: {fmt}, template: {tpl}")
+            except Exception:
+                pass
             self._cache[cache_key] = llm
         else:
             print(f"[ToriiGate GGUF] Reusing cached model.")
@@ -388,19 +395,24 @@ class ToriiGateGGUFCaptioner:
         b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
         print(f"[ToriiGate GGUF] Image encoded: {len(b64_data)//1024} KB base64 JPEG")
 
-        # ── build messages ─────────────────────────────────────────────
+        # ── build messages (matching original ToriiGate Captioner format) ──
         seed_val = int(seed) if seed != 0 else random.SystemRandom().randint(1, 2**63 - 1)
 
-        messages = []
-        if system_prompt.strip():
-            messages.append({"role": "system", "content": system_prompt.strip()})
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"}},
-            ],
-        })
+        # Match the exact format used by the working transformers version:
+        # system content as list, image BEFORE text in user
+        messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": system_prompt}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"}},
+                    {"type": "text", "text": prompt},
+                ],
+            },
+        ]
 
         # ── generate ──────────────────────────────────────────────────
         print(f"[ToriiGate GGUF] Generating (max_tokens={max_new_tokens}, temp={actual_temp:.2f})...")
