@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .prompts import system_prompt
+from .prompts import make_user_query, prompts_b, prompts_names_only, system_prompt
 
 # ===========================================================================
 # Constants
@@ -157,6 +157,20 @@ def _resolve_paths(model_quant: str, gguf_path: str, mmproj_path: str):
 # ComfyUI Node
 # ===========================================================================
 
+CAPTION_TYPES = [
+    "long_thoughts_v2",
+    "long_thoughts",
+    "json",
+    "long",
+    "min_structured_md",
+    "json_comic",
+    "md_comic",
+    "min_structured_json",
+    "chroma-style",
+    "short",
+]
+
+
 class ToriiGateGGUFCaptioner:
     """
     Loads ToriiGate GGUF model directly via llama-cpp-python.
@@ -175,6 +189,10 @@ class ToriiGateGGUFCaptioner:
                 }),
             },
             "optional": {
+                "caption_type": (CAPTION_TYPES, {
+                    "default": "long",
+                    "tooltip": "Caption format. long is natural paragraphs; json/min_structured produce structured output; short is brief.",
+                }),
                 "model_quant": (GGUF_QUANTS, {
                     "default": "Q4_K_M",
                     "tooltip": "GGUF quantization. Q4_K_M is the recommended balance of quality vs size (3.07 GB).",
@@ -211,7 +229,7 @@ class ToriiGateGGUFCaptioner:
                 "prompt": ("STRING", {
                     "multiline": True,
                     "default": "",
-                    "tooltip": "Caption prompt. Connect the Grounding Builder output here, or type your own.",
+                    "tooltip": "Caption prompt. Connect Grounding Builder here, or leave empty to auto-generate using caption_type format.",
                     "forceInput": True,
                 }),
                 "max_new_tokens": ("INT", {
@@ -254,6 +272,7 @@ class ToriiGateGGUFCaptioner:
     def caption(
         self,
         image,
+        caption_type="long",
         model_quant="Q4_K_M",
         gguf_path="",
         mmproj_path="",
@@ -293,7 +312,21 @@ class ToriiGateGGUFCaptioner:
         cache_key = (model_quant if not gguf_path else gguf_path, ngl, ctx)
 
         if not prompt:
-            prompt = "Describe this image in detail."
+            # Use the model's native prompt format (required for accurate captions)
+            empty_grounding = {"tags": [], "characters": [],
+                               "char_p_tags": {"chars": {}, "skins": {}},
+                               "char_descr": {"chars": {}, "skins": {}}}
+            prompt = make_user_query(
+                empty_grounding,
+                c_type=caption_type,
+                use_names=True,
+                add_tags=False,
+                add_characters=False,
+                add_char_tags=False,
+                add_description=False,
+                underscores_replace=False,
+            )
+            print(f"[ToriiGate GGUF] Using caption_type={caption_type}")
 
         print(f"\n[ToriiGate GGUF] quant={model_quant}, n_gpu_layers={ngl}, n_ctx={ctx}")
         gguf_local, mmproj_local = _resolve_paths(model_quant, gguf_path, mmproj_path)
